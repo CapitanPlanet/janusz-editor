@@ -14,25 +14,25 @@ fn save_scene_json(content: String, day_name: String) -> Result<String, String> 
 }
 
 #[tauri::command]
-async fn copy_asset_file(src_path: String, asset_type: String) -> Result<String, String> {
-    let base_path = std::env::current_dir().map_err(|e| e.to_string())?;
-    let dest_folder = match asset_type.as_str() {
-        "Backgrounds" => base_path.join("../Assets/Backgrounds"),
-        "Voices" => base_path.join("../Assets/Voices"),
-        "Music" => base_path.join("../Assets/Music"),
-        _ => base_path.join("../Assets/Misc")
-    };
-    fs::create_dir_all(&dest_folder).map_err(|e| e.to_string())?;
+async fn copy_asset_file(src_path: String, asset_type: String, app_handle: tauri::AppHandle) -> Result<String, String> {
+    use tauri::Manager;
+    
+    let app_data_dir = app_handle.path().app_data_dir().map_err(|e| e.to_string())?;
+    let dest_folder = app_data_dir.join("Backgrounds");
+    
+    std::fs::create_dir_all(&dest_folder).map_err(|e| e.to_string())?;
+    
     let file_name = PathBuf::from(&src_path)
       .file_name()
       .ok_or("Brak nazwy pliku")?
       .to_string_lossy()
       .to_string();
+      
     let dest_path = dest_folder.join(&file_name);
-    fs::copy(&src_path, &dest_path).map_err(|e| e.to_string())?;
-    Ok(format!("Assets/{}/{}", asset_type, file_name).replace("\\", "/"))
+    std::fs::copy(&src_path, &dest_path).map_err(|e| e.to_string())?;
+    
+    Ok(format!("backgrounds/{}", file_name).replace("\\", "/"))
 }
-
 fn main() {
     tauri::Builder::default()
       .plugin(tauri_plugin_dialog::init())

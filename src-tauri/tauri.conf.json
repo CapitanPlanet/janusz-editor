@@ -13,12 +13,17 @@
     "windows": [
       {
         "title": "janusz-editor",
-        "width": 800,
-        "height": 600
+        "width": 1200,
+        "height": 800,
+        "resizable": true
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self' ipc: http://ipc.localhost; img-src 'self' asset: https://asset.localhost data: blob:; style-src 'self' 'unsafe-inline'",
+      "assetProtocol": {
+        "enable": true,
+        "scope": ["$APPDATA/**", "$RESOURCE/**", "$APP/**"]
+      }
     }
   },
   "bundle": {
