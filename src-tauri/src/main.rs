@@ -15,8 +15,6 @@ struct ProjectMeta {
     name: String,
     author: String,
     version: String,
-    created: String,
-    uuid: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -30,7 +28,7 @@ async fn get_last_project(app_handle: tauri::AppHandle) -> Result<Option<String>
     let app_dir = app_handle.path().app_data_dir().map_err(|e| e.to_string())?;
     let config_path = app_dir.join("last_project.json");
     
-    if !config_path.exists() {
+    if!config_path.exists() {
         return Ok(None);
     }
     
@@ -62,7 +60,7 @@ async fn create_new_project(name: String, app_handle: tauri::AppHandle) -> Resul
     let template_bg = resource_dir.join("resources/templates/tutorial_bg.jpg");
     if template_bg.exists() {
         fs::copy(&template_bg, project_path.join("assets/backgrounds/tutorial_bg.jpg"))
-         .map_err(|e| e.to_string())?;
+        .map_err(|e| e.to_string())?;
     }
     
     let project = ProjectData {
@@ -70,8 +68,6 @@ async fn create_new_project(name: String, app_handle: tauri::AppHandle) -> Resul
             name: name.clone(),
             author: "Janusz".to_string(),
             version: "1.0.0".to_string(),
-            created: chrono::Utc::now().to_rfc3339(),
-            uuid: uuid::Uuid::new_v4().to_string(),
         },
         scenes: serde_json::json!([{
             "Id": "dzien_0",
@@ -114,13 +110,13 @@ async fn load_project(path: String, app_handle: tauri::AppHandle) -> Result<Stri
 
 fn main() {
     tauri::Builder::default()
-     .plugin(tauri_plugin_dialog::init())
-     .plugin(tauri_plugin_fs::init())
-     .invoke_handler(tauri::generate_handler![
+    .plugin(tauri_plugin_dialog::init())
+    .plugin(tauri_plugin_fs::init())
+    .invoke_handler(tauri::generate_handler![
             get_last_project, 
             create_new_project,
             load_project
         ])
-     .run(tauri::generate_context!())
-     .expect("error while running tauri application");
+    .run(tauri::generate_context!())
+    .expect("error while running tauri application");
 }

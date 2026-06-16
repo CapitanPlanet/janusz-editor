@@ -2,6 +2,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { invoke, convertFileSrc } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
+import { writeTextFile, readDir, readTextFile } from '@tauri-apps/plugin-fs'
 
 const currentProjectPath = ref(null)
 const projectData = ref(null)
@@ -15,18 +16,6 @@ const currentScene = computed(() => {
   return projectData.value.scenes.find(s => s.Id === currentSceneId.value)
 })
 
-const nextScenes = computed(() => {
-  if (!currentScene.value?.Choices ||!projectData.value) return []
-  return currentScene.value.Choices.map(choice => {
-    const target = projectData.value.scenes.find(s => s.Id === choice.Target)
-    return {
-     ...choice,
-      targetTitle: target?.SceneTitle || choice.Target,
-      exists:!!target
-    }
-  })
-})
-
 // === PROJEKTY ===
 async function loadProject(path) {
   try {
@@ -35,6 +24,7 @@ async function loadProject(path) {
     currentProjectPath.value = path
     currentSceneId.value = projectData.value.scenes[0]?.Id || null
     await scanBackgrounds()
+    console.log('[PROJ] Wczytano:', path)
   } catch (e) {
     alert('Błąd wczytywania: ' + e)
   }
@@ -43,7 +33,7 @@ async function loadProject(path) {
 async function openProjectDialog() {
   const selected = await open({
     directory: true,
-    defaultPath: await invoke('plugin:fs|document_dir')
+    defaultPath: 'C:\\Users\\MD-Core\\OneDrive\\Dokumenty\\Janusz Projects'
   })
   if (selected) await loadProject(selected)
 }
@@ -63,11 +53,15 @@ async function createProject() {
 async function saveProject() {
   if (!currentProjectPath.value ||!projectData.value) return
   try {
-    const json = JSON.stringify(projectData.value, null, 2)
+    const cleanData = JSON.parse(JSON.stringify(projectData.value))
+    const json = JSON.stringify(cleanData, null, 2)
     const path = `${currentProjectPath.value}/project.json`
-    await invoke('plugin:fs|write_text_file', { path, contents: json })
-    console.log('[PROJ] Zapisano')
+    
+    await writeTextFile(path, json)
+    console.log('[PROJ] Zapisano:', path)
+    alert('Zapisano!')
   } catch (e) {
+    console.error('[PROJ] Błąd zapisu:', e)
     alert('Błąd zapisu: ' + e)
   }
 }
@@ -83,11 +77,12 @@ async function scanBackgrounds() {
   if (!currentProjectPath.value) return
   try {
     const bgPath = `${currentProjectPath.value}/assets/backgrounds`
-    const entries = await invoke('plugin:fs|read_dir', { path: bgPath })
+    const entries = await readDir(bgPath)
     availableBackgrounds.value = entries
-     .filter(e => e.name.endsWith('.jpg') || e.name.endsWith('.png'))
-     .map(e => e.name.replace(/\.[^/.]+$/, ""))
+   .filter(e => e.name.endsWith('.jpg') || e.name.endsWith('.png'))
+   .map(e => e.name.replace(/\.[^/.]+$/, ""))
   } catch (e) {
+    console.error('[PROJ] Błąd skanowania teł:', e)
     availableBackgrounds.value = []
   }
 }
@@ -111,11 +106,26 @@ function removeChoice(index) {
   currentScene.value.Choices.splice(index, 1)
 }
 
+function updateChoice(index, field, value) {
+  if (!currentScene.value?.Choices[index]) return
+  currentScene.value.Choices[index][field] = value
+}
+
+function checkSceneExists(sceneId) {
+  if (!projectData.value) return false
+  return projectData.value.scenes.some(s => s.Id === sceneId)
+}
+
 onMounted(async () => {
-  const last = await invoke('get_last_project')
-  if (last) {
-    await loadProject(last)
-  } else {
+  try {
+    const last = await invoke('get_last_project')
+    if (last) {
+      await loadProject(last)
+    } else {
+      showNewProjectModal.value = true
+    }
+  } catch (e) {
+    console.error('Błąd startu:', e)
     showNewProjectModal.value = true
   }
   
@@ -218,30 +228,35 @@ onMounted(async () => {
           <button @click="addChoice" class="btn-add">+ Dodaj</button>
         </div>
         
-        <div v-if="nextScenes.length === 0" class="no-choices">
+        <div v-if="!currentScene?.Choices || currentScene.Choices.length === 0" class="no-choices">
           Brak wyborów - koniec ścieżki
         </div>
         
         <div 
-          v-for="(choice, idx) in nextScenes" 
+          v-for="(choice, idx) in currentScene?.Choices || []" 
           :key="idx"
-          :class="['choice-item', { missing:!choice.exists }]"
+          class="choice-item"
         >
           <div class="choice-edit">
-            <input v-model="choice.Text" placeholder="Tekst wyboru" />
-            <select v-model="choice.Target">
+            <input 
+              :value="choice.Text" 
+              @input="updateChoice(idx, 'Text', $event.target.value)"
+              placeholder="Tekst wyboru" 
+            />
+            <select 
+              :value="choice.Target"
+              @change="updateChoice(idx, 'Target', $event.target.value)"
+            >
               <option v-for="s in projectData.scenes" :key="s.Id" :value="s.Id">
                 {{ s.Id }} - {{ s.SceneTitle }}
               </option>
             </select>
           </div>
           <div class="choice-actions">
-            <button @click="choice.exists && goToScene(choice.Target)" :disabled="!choice.exists">
-              Idź →
-            </button>
+            <button @click="goToScene(choice.Target)">Idź →</button>
             <button @click="removeChoice(idx)" class="btn-delete">✕</button>
           </div>
-          <div v-if="!choice.exists" class="missing-badge">SCENA NIE ISTNIEJE</div>
+          <div v-if="!checkSceneExists(choice.Target)" class="missing-badge">SCENA NIE ISTNIEJE</div>
         </div>
       </aside>
 
@@ -328,15 +343,6 @@ onMounted(async () => {
   font-style: italic;
 }
 
-.no-bg {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 100%;
-  color: #64748b;
-  font-style: italic;
-}
-
 .scene-form { display: flex; flex-direction: column; gap: 12px; }
 .form-row { display: flex; flex-direction: column; gap: 4px; }
 .form-row label { color: #4ade80; font-size: 12px; font-weight: bold; }
@@ -362,7 +368,6 @@ onMounted(async () => {
   margin-bottom: 8px;
   border-left: 3px solid #16a34a;
 }
-.choice-item.missing { border-left-color: #ef4444; opacity: 0.7; }
 .choice-edit { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
 .choice-edit input,.choice-edit select {
   background: #0a1628;
