@@ -1,558 +1,380 @@
-<script setup lang="ts">
-import { ref, watch } from 'vue'
-import { open, save } from '@tauri-apps/plugin-dialog'
-import { readTextFile, writeTextFile, exists } from '@tauri-apps/plugin-fs'
+<script setup>
+import { ref, onMounted, computed } from 'vue'
 import { invoke, convertFileSrc } from '@tauri-apps/api/core'
-import { appDataDir, join } from '@tauri-apps/api/path'
+import { open } from '@tauri-apps/plugin-dialog'
 
-interface Choice {
-  Text: string
-  Next: string
-  Cebula: number
-  Wstyd: number
-  Portfel: number
-  Reputacja: number
-  ReactionText: string
-  ReactionImage: string
-  SoundFile?: string
-  FlagsSet?: string[]
-  FlagsRequired?: string[]
-  MinPortfel?: number | null
-  KosztPortfel?: number | null
-  FailText?: string
-}
+const currentProjectPath = ref(null)
+const projectData = ref(null)
+const currentSceneId = ref(null)
+const showNewProjectModal = ref(false)
+const newProjectName = ref('')
+const availableBackgrounds = ref([])
 
-interface Scene {
-  Id: string
-  SceneTitle: string
-  Background: string
-  Text: string
-  Choices: Choice[]
-}
+const currentScene = computed(() => {
+  if (!projectData.value) return null
+  return projectData.value.scenes.find(s => s.Id === currentSceneId.value)
+})
 
-const scenes = ref<Scene[]>([
-  {
-    Id: "start",
-    SceneTitle: "Start gry",
-    Background: "",
-    Text: "6:47. Grażyna: 'Janusz wstawaj do roboty!'",
-    Choices: [
-      { Text: "Wstaję", Next: "kuchnia", Cebula: 0, Wstyd: 0, Portfel: 0, Reputacja: 1, ReactionText: "Wstałeś jak chłop", ReactionImage: "" }
-    ]
-  }
-])
-
-const selectedSceneIndex = ref(0)
-const imageCache = ref<Record<string, string>>({})
-const imageLoading = ref<Record<string, boolean>>({})
-
-const resolveImagePath = async (path: string): Promise<string> => {
-  if (!path) return ''
-  if (path.startsWith('asset://')) return path
-
-  if (path.startsWith('backgrounds/')) {
-    try {
-      const appDir = await appDataDir()
-      const fullPath = await join(appDir, path)
-      const fileExists = await exists(fullPath)
-      console.log('[IMG] AppData:', fullPath, 'exists:', fileExists)
-      if (!fileExists) return ''
-      return convertFileSrc(fullPath)
-    } catch (e) {
-      console.error('[IMG] Błąd AppData:', e)
-      return ''
+const nextScenes = computed(() => {
+  if (!currentScene.value?.Choices ||!projectData.value) return []
+  return currentScene.value.Choices.map(choice => {
+    const target = projectData.value.scenes.find(s => s.Id === choice.Target)
+    return {
+     ...choice,
+      targetTitle: target?.SceneTitle || choice.Target,
+      exists:!!target
     }
-  }
-
-  if (path.startsWith('images/')) {
-    return path
-  }
-
-  if (path.match(/^[A-Z]:\\/i) || path.startsWith('/')) {
-    try {
-      return convertFileSrc(path)
-    } catch (e) {
-      console.error('[IMG] Błąd convertFileSrc:', e)
-      return ''
-    }
-  }
-
-  return path
-}
-
-const getImageSrc = (path: string) => {
-  if (!path) return ''
-  if (imageCache.value[path]) return imageCache.value[path]
-  if (imageCache.value[path] === 'error') return ''
-  if (imageLoading.value[path]) return ''
-
-  imageLoading.value[path] = true
-  resolveImagePath(path).then(resolved => {
-    if (resolved) {
-      imageCache.value[path] = resolved
-    } else {
-      imageCache.value[path] = 'error'
-      console.error('[IMG] Nie udało się załadować:', path)
-    }
-    imageLoading.value[path] = false
   })
+})
 
-  return ''
-}
-
-watch(scenes, () => {
-  const allPaths = new Set<string>()
-  scenes.value.forEach(s => {
-    if (s.Background) allPaths.add(s.Background)
-    s.Choices.forEach(c => {
-      if (c.ReactionImage) allPaths.add(c.ReactionImage)
-    })
-  })
-
-  Object.keys(imageCache.value).forEach(key => {
-    if (!allPaths.has(key)) delete imageCache.value[key]
-  })
-}, { deep: true })
-
-const addScene = () => {
-  scenes.value.push({
-    Id: `scena_${Date.now()}`,
-    SceneTitle: "Nowa scena",
-    Background: "",
-    Text: "",
-    Choices: []
-  })
-  selectedSceneIndex.value = scenes.value.length - 1
-}
-
-const deleteScene = (index: number) => {
-  if (scenes.value.length <= 1) {
-    alert('Nie możesz usunąć ostatniej sceny!')
-    return
-  }
-  scenes.value.splice(index, 1)
-  if (selectedSceneIndex.value >= scenes.value.length) {
-    selectedSceneIndex.value = Math.max(0, scenes.value.length - 1)
-  }
-}
-
-const addChoice = (sceneIndex: number) => {
-  scenes.value[sceneIndex].Choices.push({
-    Text: "Nowy wybór",
-    Next: "",
-    Cebula: 0,
-    Wstyd: 0,
-    Portfel: 0,
-    Reputacja: 0,
-    ReactionText: "",
-    ReactionImage: ""
-  })
-}
-
-const deleteChoice = (sceneIndex: number, choiceIndex: number) => {
-  scenes.value[sceneIndex].Choices.splice(choiceIndex, 1)
-}
-
-const saveProject = async () => {
+// === PROJEKTY ===
+async function loadProject(path) {
   try {
-    const path = await save({
-      filters: [{ name: 'JSON', extensions: ['json'] }]
-    })
-    if (path) {
-      await writeTextFile(path, JSON.stringify(scenes.value, null, 2))
-      alert('Projekt zapisany!')
-    }
-  } catch (error) {
-    console.error('Błąd zapisu:', error)
-    alert(`Błąd zapisu: ${error}`)
+    const json = await invoke('load_project', { path })
+    projectData.value = JSON.parse(json)
+    currentProjectPath.value = path
+    currentSceneId.value = projectData.value.scenes[0]?.Id || null
+    await scanBackgrounds()
+  } catch (e) {
+    alert('Błąd wczytywania: ' + e)
   }
 }
 
-const loadProject = async () => {
-  try {
-    const selected = await open({
-      filters: [{ name: 'JSON', extensions: ['json'] }]
-    })
-    if (selected) {
-      const content = await readTextFile(selected as string)
-      const parsed = JSON.parse(content)
-      scenes.value = parsed
-      selectedSceneIndex.value = 0
-      imageCache.value = {}
-      alert(`Wczytano ${parsed.length} scen`)
-    }
-  } catch (error) {
-    console.error('Błąd wczytywania:', error)
-    alert(`Błąd: ${error}`)
-  }
-}
-
-const pickBackground = async () => {
-  console.log('[PICK] Start wyboru tła')
+async function openProjectDialog() {
   const selected = await open({
-    multiple: false,
-    filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif'] }]
+    directory: true,
+    defaultPath: await invoke('plugin:fs|document_dir')
   })
+  if (selected) await loadProject(selected)
+}
 
-  if (!selected || typeof selected!== 'string') {
-    console.log('[PICK] Anulowano wybór')
-    return
+async function createProject() {
+  if (!newProjectName.value) return
+  try {
+    const path = await invoke('create_new_project', { name: newProjectName.value })
+    await loadProject(path)
+    showNewProjectModal.value = false
+    newProjectName.value = ''
+  } catch (e) {
+    alert('Błąd: ' + e)
   }
+}
 
-  console.log('[PICK] Wybrano:', selected)
+async function saveProject() {
+  if (!currentProjectPath.value ||!projectData.value) return
+  try {
+    const json = JSON.stringify(projectData.value, null, 2)
+    const path = `${currentProjectPath.value}/project.json`
+    await invoke('plugin:fs|write_text_file', { path, contents: json })
+    console.log('[PROJ] Zapisano')
+  } catch (e) {
+    alert('Błąd zapisu: ' + e)
+  }
+}
+
+// === ASSSETY ===
+function getAssetUrl(assetName) {
+  if (!currentProjectPath.value ||!assetName) return ''
+  const fullPath = `${currentProjectPath.value}/assets/backgrounds/${assetName}.jpg`
+  return convertFileSrc(fullPath)
+}
+
+async function scanBackgrounds() {
+  if (!currentProjectPath.value) return
+  try {
+    const bgPath = `${currentProjectPath.value}/assets/backgrounds`
+    const entries = await invoke('plugin:fs|read_dir', { path: bgPath })
+    availableBackgrounds.value = entries
+     .filter(e => e.name.endsWith('.jpg') || e.name.endsWith('.png'))
+     .map(e => e.name.replace(/\.[^/.]+$/, ""))
+  } catch (e) {
+    availableBackgrounds.value = []
+  }
+}
+
+// === SCENY ===
+function goToScene(sceneId) {
+  currentSceneId.value = sceneId
+}
+
+function addChoice() {
+  if (!currentScene.value) return
+  if (!currentScene.value.Choices) currentScene.value.Choices = []
+  currentScene.value.Choices.push({
+    Text: 'Nowy wybór',
+    Target: projectData.value.scenes[0]?.Id || ''
+  })
+}
+
+function removeChoice(index) {
+  if (!currentScene.value?.Choices) return
+  currentScene.value.Choices.splice(index, 1)
+}
+
+onMounted(async () => {
+  const last = await invoke('get_last_project')
+  if (last) {
+    await loadProject(last)
+  } else {
+    showNewProjectModal.value = true
+  }
   
-  try {
-    const newPath = await invoke<string>('copy_asset_file', { 
-      srcPath: selected, 
-      assetType: 'Backgrounds' 
-    })
-    
-    scenes.value[selectedSceneIndex.value].Background = newPath
-    delete imageCache.value[newPath]
-    console.log('[PICK] SUKCES! Zapisano ścieżkę:', newPath)
-    alert(`Skopiowano: ${newPath}`)
-  } catch (e) {
-    console.error('[PICK] BŁĄD KOPIOWANIA:', e)
-    alert(`Błąd kopiowania!\n${e}`)
-  }
-}
-
-const pickReactionImage = async (choiceIndex: number) => {
-  const selected = await open({
-    multiple: false,
-    filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif'] }]
+  window.addEventListener('keydown', (e) => {
+    if (e.ctrlKey && e.key === 's') {
+      e.preventDefault()
+      saveProject()
+    }
   })
-
-  if (!selected || typeof selected!== 'string') return
-
-  try {
-    const newPath = await invoke<string>('copy_asset_file', { 
-      srcPath: selected, 
-      assetType: 'Backgrounds' 
-    })
-    
-    scenes.value[selectedSceneIndex.value].Choices[choiceIndex].ReactionImage = newPath
-    delete imageCache.value[newPath]
-  } catch (e) {
-    console.error('[PICK] Błąd kopiowania:', e)
-    alert(`Błąd kopiowania!\n${e}`)
-  }
-}
+})
 </script>
 
 <template>
-  <main class="container">
-    <h1>Edytor Janusza V1.2 - RPG Maker</h1>
+  <div class="editor">
+    <header class="top-bar">
+      <h1>Edytor Janusza V1.2</h1>
+      <div class="toolbar">
+        <button @click="showNewProjectModal = true">+ Nowy</button>
+        <button @click="openProjectDialog">📂 Otwórz</button>
+        <button @click="saveProject" :disabled="!currentProjectPath">💾 Zapisz</button>
+      </div>
+      <div v-if="currentProjectPath" class="project-path">{{ currentProjectPath }}</div>
+    </header>
 
-    <div class="toolbar">
-      <button @click="addScene">+ Dodaj scenę</button>
-      <button @click="saveProject">💾 Zapisz Projekt</button>
-      <button @click="loadProject">📂 Wczytaj Projekt</button>
+    <!-- Modal Nowy Projekt -->
+    <div v-if="showNewProjectModal" class="modal">
+      <div class="modal-content">
+        <h3>Nowy projekt Janusza</h3>
+        <input 
+          v-model="newProjectName" 
+          placeholder="Nazwa projektu" 
+          @keyup.enter="createProject"
+          autofocus
+        />
+        <button @click="createProject">Stwórz</button>
+        <button @click="showNewProjectModal = false">Anuluj</button>
+      </div>
     </div>
 
-    <div class="editor-layout">
-      <div class="scene-list">
-        <h3>Sceny [{{ scenes.length }}]</h3>
-        <div
-          v-for="(scene, index) in scenes"
+    <!-- Główny layout -->
+    <div v-if="projectData" class="main-grid">
+      
+      <!-- LEWA: Lista scen -->
+      <aside class="scenes-panel">
+        <h3>Sceny [{{ projectData.scenes.length }}]</h3>
+        <div 
+          v-for="scene in projectData.scenes" 
           :key="scene.Id"
-          @click="selectedSceneIndex = index"
-          :class="{ active: selectedSceneIndex === index }"
-          class="scene-item"
+          :class="['scene-item', { active: scene.Id === currentSceneId }]"
+          @click="goToScene(scene.Id)"
         >
-          <span>{{ scene.Id }}</span>
-          <button @click.stop="deleteScene(index)" class="delete-btn">🗑</button>
+          <div class="scene-id">{{ scene.Id }}</div>
+          <div class="scene-title">{{ scene.SceneTitle }}</div>
         </div>
-      </div>
+      </aside>
 
-      <div class="scene-editor" v-if="scenes[selectedSceneIndex]">
-        <h3>Edycja: {{ scenes[selectedSceneIndex].Id }}</h3>
-
-        <div class="scene-preview">
-          <img
-            v-if="getImageSrc(scenes[selectedSceneIndex].Background)"
-            :src="getImageSrc(scenes[selectedSceneIndex].Background)"
-            alt="Podgląd tła"
-          />
-          <div v-else class="no-image">
-            {{ scenes[selectedSceneIndex].Background? 'Ładowanie/błąd - sprawdź konsolę F12' : 'Brak tła - wybierz plik' }}
-          </div>
-        </div>
-
-        <label>ID Sceny:</label>
-        <input v-model="scenes[selectedSceneIndex].Id" placeholder="unikalne_id" />
-
-        <label>Tytuł sceny:</label>
-        <input v-model="scenes[selectedSceneIndex].SceneTitle" placeholder="DZIEŃ 1 - PONIEDZIAŁEK" />
-
-        <label>Background:</label>
-        <div style="display: flex; gap: 0.5rem;">
-          <input
-            v-model="scenes[selectedSceneIndex].Background"
-            placeholder="Kliknij Wybierz ->"
-            style="flex: 1;"
-            readonly
-          />
-          <button @click="pickBackground" style="white-space: nowrap;">📁 Wybierz</button>
-        </div>
-
-        <label>Tekst sceny:</label>
-        <textarea v-model="scenes[selectedSceneIndex].Text" rows="6" placeholder="6:47. Grażyna: 'Janusz...'" />
-
-        <h4>Wybory [{{ scenes[selectedSceneIndex].Choices.length }}]</h4>
-        <button @click="addChoice(selectedSceneIndex)">+ Dodaj wybór</button>
-
-        <div v-for="(choice, cIndex) in scenes[selectedSceneIndex].Choices" :key="cIndex" class="choice-card">
-          <div class="choice-header">
-            <strong>Wybór {{ cIndex + 1 }}</strong>
-            <button @click="deleteChoice(selectedSceneIndex, cIndex)" class="delete-btn">🗑</button>
+      <!-- ŚRODEK: Tło + Edycja -->
+      <main class="editor-panel">
+        <div v-if="currentScene">
+          <!-- TŁO NA GÓRZE -->
+          <div class="bg-preview">
+            <img 
+              v-if="currentScene.Background" 
+              :src="getAssetUrl(currentScene.Background)" 
+              alt="tło"
+            />
+            <div v-else class="no-bg">Brak tła</div>
+            <div class="bg-label">{{ currentScene.Background || 'brak' }}</div>
           </div>
 
-          <label>Tekst wyboru:</label>
-          <input v-model="choice.Text" />
-
-          <label>Next ID:</label>
-          <input v-model="choice.Next" placeholder="id_następnej_sceny" />
-
-          <div class="stats-row">
-            <div><label>Cebula:</label><input type="number" v-model.number="choice.Cebula" /></div>
-            <div><label>Wstyd:</label><input type="number" v-model.number="choice.Wstyd" /></div>
-            <div><label>Portfel:</label><input type="number" v-model.number="choice.Portfel" /></div>
-            <div><label>Reputacja:</label><input type="number" v-model.number="choice.Reputacja" /></div>
-          </div>
-
-          <label>ReactionText:</label>
-          <input v-model="choice.ReactionText" />
-
-          <label>ReactionImage:</label>
-          <div style="display: flex; gap: 0.5rem; align-items: center;">
-            <input v-model="choice.ReactionImage" placeholder="Kliknij Wybierz ->" style="flex: 1;" readonly />
-            <button @click="pickReactionImage(cIndex)" style="white-space: nowrap;">📁</button>
-          </div>
-          <div v-if="choice.ReactionImage && getImageSrc(choice.ReactionImage)" class="reaction-preview">
-            <img :src="getImageSrc(choice.ReactionImage)" alt="Reaction" />
+          <!-- DANE SCENY -->
+          <div class="scene-form">
+            <div class="form-row">
+              <label>ID Sceny:</label>
+              <input v-model="currentScene.Id" />
+            </div>
+            <div class="form-row">
+              <label>Tytuł sceny:</label>
+              <input v-model="currentScene.SceneTitle" />
+            </div>
+            <div class="form-row">
+              <label>Tło:</label>
+              <select v-model="currentScene.Background">
+                <option value="">Brak</option>
+                <option v-for="bg in availableBackgrounds" :key="bg" :value="bg">{{ bg }}</option>
+              </select>
+            </div>
+            <div class="form-row">
+              <label>Tekst sceny:</label>
+              <textarea v-model="currentScene.Text" rows="8"></textarea>
+            </div>
           </div>
         </div>
-      </div>
+      </main>
+
+      <!-- PRAWA: Wybory -->
+      <aside class="choices-panel">
+        <div class="choices-header">
+          <h3>Wybory</h3>
+          <button @click="addChoice" class="btn-add">+ Dodaj</button>
+        </div>
+        
+        <div v-if="nextScenes.length === 0" class="no-choices">
+          Brak wyborów - koniec ścieżki
+        </div>
+        
+        <div 
+          v-for="(choice, idx) in nextScenes" 
+          :key="idx"
+          :class="['choice-item', { missing:!choice.exists }]"
+        >
+          <div class="choice-edit">
+            <input v-model="choice.Text" placeholder="Tekst wyboru" />
+            <select v-model="choice.Target">
+              <option v-for="s in projectData.scenes" :key="s.Id" :value="s.Id">
+                {{ s.Id }} - {{ s.SceneTitle }}
+              </option>
+            </select>
+          </div>
+          <div class="choice-actions">
+            <button @click="choice.exists && goToScene(choice.Target)" :disabled="!choice.exists">
+              Idź →
+            </button>
+            <button @click="removeChoice(idx)" class="btn-delete">✕</button>
+          </div>
+          <div v-if="!choice.exists" class="missing-badge">SCENA NIE ISTNIEJE</div>
+        </div>
+      </aside>
+
     </div>
-  </main>
+  </div>
 </template>
 
-<style>
-:root {
-  font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
-  font-size: 14px;
-  color: #0f0f0f;
-  background-color: #1a1a1a;
-}
+<style scoped>
+.editor { background: #0a1628; color: #fff; min-height: 100vh; display: flex; flex-direction: column; }
 
-body {
-  margin: 0;
-  position: relative;
-  min-height: 100vh;
-}
+.top-bar { padding: 12px 20px; border-bottom: 2px solid #16a34a; }
+.top-bar h1 { margin: 0 0 8px 0; font-size: 20px; }
+.toolbar { display: flex; gap: 8px; }
+.toolbar button { padding: 6px 12px; background: #1e293b; border: 1px solid #334155; color: #fff; cursor: pointer; }
+.toolbar button:hover { background: #334155; }
+.toolbar button:disabled { opacity: 0.4; cursor: not-allowed; }
+.project-path { font-size: 11px; color: #4ade80; margin-top: 6px; font-family: monospace; }
 
-body::before {
-  content: '';
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background: linear-gradient(135deg, #1e3c72 0%, #2a5298 50%, #1e3c72 100%);
-  opacity: 0.9;
-  z-index: -1;
-  filter: blur(2px);
-}
+.modal { position: fixed; inset: 0; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 100; }
+.modal-content { background: #1e293b; padding: 24px; border-radius: 8px; border: 2px solid #16a34a; }
+.modal-content input { width: 300px; padding: 8px; margin: 12px 0; background: #0a1628; border: 1px solid #334155; color: #fff; }
+.modal-content button { margin-right: 8px; padding: 6px 12px; }
 
-.container {
-  margin: 0;
-  padding: 1rem;
-  height: 100vh;
-  display: flex;
-  flex-direction: column;
-  backdrop-filter: blur(10px);
-}
-
-h1 {
-  color: #2ecc71;
-  margin: 0 0 1rem 0;
-  text-shadow: 0 2px 8px rgba(0,0,0,0.5);
-}
-
-.toolbar {
-  display: flex;
-  gap: 0.5rem;
-  margin-bottom: 1rem;
-}
-
-button {
-  border-radius: 6px;
-  border: 1px solid rgba(255,255,255,0.1);
-  padding: 0.5em 1em;
-  font-size: 1em;
-  font-weight: 500;
-  font-family: inherit;
-  color: #fff;
-  background-color: rgba(255,255,255,0.1);
-  cursor: pointer;
-  backdrop-filter: blur(5px);
-  transition: all 0.2s;
-}
-button:hover {
-  border-color: #2ecc71;
-  background-color: rgba(46, 204, 113, 0.2);
-}
-button:active { background-color: rgba(46, 204, 113, 0.3); }
-
-.editor-layout {
-  display: flex;
-  gap: 1rem;
+.main-grid { 
+  display: grid; 
+  grid-template-columns: 250px 1fr 350px; 
+  gap: 1px; 
+  background: #16a34a;
   flex: 1;
   overflow: hidden;
 }
 
-.scene-list {
-  width: 250px;
-  background: rgba(26, 26, 26, 0.85);
-  border: 1px solid rgba(255,255,255,0.1);
-  border-radius: 8px;
-  padding: 1rem;
+.scenes-panel,.editor-panel,.choices-panel { 
+  background: #0a1628; 
+  padding: 16px; 
   overflow-y: auto;
-  backdrop-filter: blur(10px);
 }
 
-.scene-item {
-  padding: 0.5rem;
-  margin-bottom: 0.5rem;
-  background: rgba(255,255,255,0.05);
-  border-radius: 4px;
-  cursor: pointer;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  color: #fff;
-  transition: all 0.2s;
-}
-.scene-item:hover { background: rgba(255,255,255,0.1); }
-.scene-item.active { background: #2ecc71; color: #000; }
+.scenes-panel h3,.choices-panel h3 { margin: 0 0 12px 0; color: #4ade80; font-size: 14px; }
 
-.scene-editor {
-  flex: 1;
-  background: rgba(26, 26, 26, 0.85);
-  border: 1px solid rgba(255,255,255,0.1);
-  border-radius: 8px;
-  padding: 1rem;
-  overflow-y: auto;
-  backdrop-filter: blur(10px);
-  color: #fff;
+.scene-item { 
+  padding: 10px; 
+  background: #1e293b; 
+  margin-bottom: 6px; 
+  cursor: pointer; 
+  border-left: 3px solid transparent;
+}
+.scene-item:hover { background: #334155; }
+.scene-item.active { background: #16a34a; border-left-color: #4ade80; }
+.scene-id { font-family: monospace; font-size: 11px; color: #94a3b8; }
+.scene-title { font-size: 13px; margin-top: 2px; }
+
+.bg-preview {
+  position: relative;
+  width: 100%;
+  background: #000;
+  border: 2px solid #334155;
+  margin-bottom: 16px;
 }
 
-label {
+.bg-preview img {
+  width: 100%;
+  height: auto;
   display: block;
-  margin-top: 0.75rem;
-  margin-bottom: 0.25rem;
-  font-weight: 600;
-  font-size: 0.9em;
-  color: #2ecc71;
 }
 
-input, textarea {
-  width: 100%;
-  padding: 0.5rem;
-  border: 1px solid rgba(255,255,255,0.2);
-  border-radius: 4px;
-  font-family: inherit;
-  box-sizing: border-box;
-  background: rgba(0,0,0,0.3);
-  color: #fff;
+.bg-label {
+  position: absolute;
+  bottom: 8px;
+  right: 8px;
+  background: rgba(0,0,0,0.8);
+  color: #4ade80;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-family: monospace;
 }
 
-input:focus, textarea:focus {
-  outline: none;
-  border-color: #2ecc71;
-}
-
-input[readonly] {
-  cursor: not-allowed;
-  opacity: 0.7;
-}
-
-.choice-card {
-  background: rgba(0,0,0,0.2);
-  border: 1px solid rgba(255,255,255,0.1);
-  border-radius: 6px;
-  padding: 1rem;
-  margin-top: 1rem;
-}
-
-.choice-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 0.5rem;
-}
-
-.stats-row {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 0.5rem;
-  margin: 0.5rem 0;
-}
-
-.stats-row input { width: 100%; }
-
-.delete-btn {
-  background: #e74c3c;
-  color: white;
-  padding: 0.25rem 0.5rem;
-  font-size: 0.9em;
-}
-.delete-btn:hover { background: #c0392b; }
-
-.scene-preview {
-  width: 100%;
-  min-height: 200px;
-  max-height: 400px;
-  background: rgba(0,0,0,0.4);
-  border: 2px dashed rgba(46, 204, 113, 0.5);
-  border-radius: 8px;
-  margin: 1rem 0;
+.no-bg {
   display: flex;
   align-items: center;
   justify-content: center;
-  overflow: hidden;
-  position: relative;
+  min-height: 200px;
+  color: #64748b;
+  font-style: italic;
 }
 
-.scene-preview img {
-  width: 100%;
-  height: auto;
-  max-height: 400px;
-  object-fit: contain;
-}
-
-.scene-preview.no-image {
-  color: rgba(255,255,255,0.3);
-  font-size: 0.9em;
-}
-
-.reaction-preview {
-  margin-top: 0.5rem;
-  max-width: 150px;
-  max-height: 150px;
-  border-radius: 4px;
-  overflow: hidden;
-  border: 1px solid rgba(255,255,255,0.2);
-}
-
-.reaction-preview img {
-  width: 100%;
+.no-bg {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   height: 100%;
-  object-fit: cover;
+  color: #64748b;
+  font-style: italic;
 }
 
-h3, h4 {
+.scene-form { display: flex; flex-direction: column; gap: 12px; }
+.form-row { display: flex; flex-direction: column; gap: 4px; }
+.form-row label { color: #4ade80; font-size: 12px; font-weight: bold; }
+.form-row input,.form-row select,.form-row textarea {
+  background: #1e293b;
+  border: 1px solid #334155;
   color: #fff;
+  padding: 8px;
+  font-family: inherit;
 }
+.form-row input:focus,.form-row select:focus,.form-row textarea:focus {
+  outline: none;
+  border-color: #16a34a;
+}
+
+.choices-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+.btn-add { padding: 4px 10px; background: #16a34a; border: none; color: #fff; cursor: pointer; font-size: 12px; }
+.btn-add:hover { background: #22c55e; }
+
+.choice-item {
+  background: #1e293b;
+  padding: 12px;
+  margin-bottom: 8px;
+  border-left: 3px solid #16a34a;
+}
+.choice-item.missing { border-left-color: #ef4444; opacity: 0.7; }
+.choice-edit { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.choice-edit input,.choice-edit select {
+  background: #0a1628;
+  border: 1px solid #334155;
+  color: #fff;
+  padding: 6px;
+  font-size: 12px;
+}
+.choice-actions { display: flex; gap: 6px; }
+.choice-actions button { padding: 4px 8px; font-size: 11px; cursor: pointer; }
+.btn-delete { background: #dc2626; border: none; color: #fff; }
+.btn-delete:hover { background: #ef4444; }
+.missing-badge { background: #ef4444; color: #fff; padding: 2px 6px; border-radius: 3px; margin-top: 6px; font-size: 10px; display: inline-block; }
+.no-choices { color: #64748b; font-style: italic; text-align: center; padding: 20px; }
 </style>
