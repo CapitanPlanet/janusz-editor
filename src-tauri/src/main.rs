@@ -28,7 +28,7 @@ async fn get_last_project(app_handle: tauri::AppHandle) -> Result<Option<String>
     let app_dir = app_handle.path().app_data_dir().map_err(|e| e.to_string())?;
     let config_path = app_dir.join("last_project.json");
     
-    if!config_path.exists() {
+    if !config_path.exists() {
         return Ok(None);
     }
     
@@ -40,6 +40,40 @@ async fn get_last_project(app_handle: tauri::AppHandle) -> Result<Option<String>
     } else {
         Ok(None)
     }
+}
+
+#[tauri::command]
+async fn get_recent_projects(app_handle: tauri::AppHandle) -> Result<Vec<String>, String> {
+    let app_dir = app_handle.path().app_data_dir().map_err(|e| e.to_string())?;
+    let path = app_dir.join("recent.json");
+    
+    if !path.exists() {
+        return Ok(vec![]);
+    }
+    
+    let content = fs::read_to_string(path).map_err(|e| e.to_string())?;
+    let mut recent: Vec<String> = serde_json::from_str(&content).unwrap_or_default();
+    recent.retain(|p| PathBuf::from(p).exists());
+    Ok(recent)
+}
+
+fn save_recent_project(app_handle: &tauri::AppHandle, path: String) -> Result<(), String> {
+    let app_dir = app_handle.path().app_data_dir().map_err(|e| e.to_string())?;
+    fs::create_dir_all(&app_dir).map_err(|e| e.to_string())?;
+    let file_path = app_dir.join("recent.json");
+    
+    let mut recent: Vec<String> = if let Ok(content) = fs::read_to_string(&file_path) {
+        serde_json::from_str(&content).unwrap_or_default()
+    } else {
+        vec![]
+    };
+    
+    recent.retain(|p| p != &path);
+    recent.insert(0, path);
+    recent.truncate(10);
+    
+    fs::write(file_path, serde_json::to_string(&recent).unwrap()).map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -59,8 +93,7 @@ async fn create_new_project(name: String, app_handle: tauri::AppHandle) -> Resul
     let resource_dir = app_handle.path().resource_dir().map_err(|e| e.to_string())?;
     let template_bg = resource_dir.join("resources/templates/tutorial_bg.jpg");
     if template_bg.exists() {
-        fs::copy(&template_bg, project_path.join("assets/backgrounds/tutorial_bg.jpg"))
-        .map_err(|e| e.to_string())?;
+        let _ = fs::copy(&template_bg, project_path.join("assets/backgrounds/tutorial_bg.jpg"));
     }
     
     let project = ProjectData {
@@ -81,15 +114,20 @@ async fn create_new_project(name: String, app_handle: tauri::AppHandle) -> Resul
     let json = serde_json::to_string_pretty(&project).map_err(|e| e.to_string())?;
     fs::write(project_path.join("project.json"), json).map_err(|e| e.to_string())?;
     
+    let path_str = project_path.to_string_lossy().to_string();
+    
+    // Zapisz jako ostatni i dodaj do recent
     let app_dir = app_handle.path().app_data_dir().map_err(|e| e.to_string())?;
     fs::create_dir_all(&app_dir).map_err(|e| e.to_string())?;
-    let last_proj = LastProject { path: project_path.to_string_lossy().to_string() };
+    let last_proj = LastProject { path: path_str.clone() };
     fs::write(
         app_dir.join("last_project.json"), 
         serde_json::to_string(&last_proj).unwrap()
     ).map_err(|e| e.to_string())?;
     
-    Ok(project_path.to_string_lossy().to_string())
+    save_recent_project(&app_handle, path_str.clone())?;
+    
+    Ok(path_str)
 }
 
 #[tauri::command]
@@ -105,6 +143,8 @@ async fn load_project(path: String, app_handle: tauri::AppHandle) -> Result<Stri
         serde_json::to_string(&last_proj).unwrap()
     ).map_err(|e| e.to_string())?;
     
+    save_recent_project(&app_handle, path)?;
+    
     Ok(content)
 }
 
@@ -113,10 +153,11 @@ fn main() {
     .plugin(tauri_plugin_dialog::init())
     .plugin(tauri_plugin_fs::init())
     .invoke_handler(tauri::generate_handler![
-            get_last_project, 
-            create_new_project,
-            load_project
-        ])
+        get_last_project,
+        get_recent_projects,
+        create_new_project,
+        load_project
+    ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
 }

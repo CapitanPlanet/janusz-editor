@@ -6,21 +6,20 @@ import { writeTextFile, readDir } from '@tauri-apps/plugin-fs'
 import { debounce } from 'lodash-es'
 
 const showLauncher = ref(true)
-const recentProjects = ref<string[]>([])
-const currentProjectPath = ref<string | null>(null)
-const projectData = ref<any>(null)
-const currentSceneId = ref<string | null>(null)
+const recentProjects = ref([])
+const currentProjectPath = ref(null)
+const projectData = ref(null)
+const currentSceneId = ref(null)
 const showNewProjectModal = ref(false)
 const newProjectName = ref('')
-const availableBackgrounds = ref<string[]>([])
+const availableBackgrounds = ref([])
 const saveStatus = ref('')
 
 const currentScene = computed(() => {
   if (!projectData.value) return null
-  return projectData.value.scenes.find((s: any) => s.Id === currentSceneId.value)
+  return projectData.value.scenes.find(s => s.Id === currentSceneId.value)
 })
 
-// === AUTO-SAVE ===
 const autoSave = debounce(async () => {
   if (!currentProjectPath.value ||!projectData.value) return
   saveStatus.value = 'Zapisywanie...'
@@ -40,7 +39,6 @@ const autoSave = debounce(async () => {
 
 watch(projectData, () => { autoSave() }, { deep: true })
 
-// === LAUNCHER ===
 async function loadRecentProjects() {
   try {
     recentProjects.value = await invoke('get_recent_projects')
@@ -50,14 +48,14 @@ async function loadRecentProjects() {
   }
 }
 
-// === PROJEKTY ===
-async function loadProject(path: string) {
+async function loadProject(path) {
   try {
-    const json = await invoke<string>('load_project', { path })
+    const json = await invoke('load_project', { path })
     projectData.value = JSON.parse(json)
     currentProjectPath.value = path
     currentSceneId.value = projectData.value.scenes[0]?.Id || null
     showLauncher.value = false
+    showNewProjectModal.value = false // <- TO JEST KLUCZOWE
     await scanBackgrounds()
     console.log('[PROJ] Wczytano:', path)
   } catch (e) {
@@ -70,13 +68,13 @@ async function openProjectDialog() {
     directory: true,
     defaultPath: 'C:\\Users\\MD-Core\\OneDrive\\Dokumenty\\Janusz Projects'
   })
-  if (selected) await loadProject(selected as string)
+  if (selected) await loadProject(selected)
 }
 
 async function createProject() {
   if (!newProjectName.value.trim()) return
   try {
-    const path = await invoke<string>('create_new_project', { name: newProjectName.value })
+    const path = await invoke('create_new_project', { name: newProjectName.value })
     await loadProject(path)
     showNewProjectModal.value = false
     newProjectName.value = ''
@@ -102,8 +100,7 @@ async function saveProject() {
   }
 }
 
-// === TŁA ===
-function getAssetUrl(assetName: string) {
+function getAssetUrl(assetName) {
   if (!currentProjectPath.value ||!assetName) return ''
   const fullPath = `${currentProjectPath.value}/assets/backgrounds/${assetName}.jpg`
   return convertFileSrc(fullPath)
@@ -115,16 +112,15 @@ async function scanBackgrounds() {
     const bgPath = `${currentProjectPath.value}/assets/backgrounds`
     const entries = await readDir(bgPath)
     availableBackgrounds.value = entries
-     .filter(e => e.name.endsWith('.jpg') || e.name.endsWith('.png'))
-     .map(e => e.name.replace(/\.[^/.]+$/, ""))
+   .filter(e => e.name.endsWith('.jpg') || e.name.endsWith('.png'))
+   .map(e => e.name.replace(/\.[^/.]+$/, ""))
   } catch (e) {
     console.error('[PROJ] Błąd skanowania teł:', e)
     availableBackgrounds.value = []
   }
 }
 
-// === SCENY ===
-function goToScene(sceneId: string) {
+function goToScene(sceneId) {
   currentSceneId.value = sceneId
 }
 
@@ -141,12 +137,12 @@ function addScene() {
   currentSceneId.value = newId
 }
 
-function deleteScene(sceneId: string) {
+function deleteScene(sceneId) {
   if (!projectData.value || projectData.value.scenes.length <= 1) {
     alert('Nie możesz usunąć ostatniej sceny')
     return
   }
-  projectData.value.scenes = projectData.value.scenes.filter((s: any) => s.Id!== sceneId)
+  projectData.value.scenes = projectData.value.scenes.filter(s => s.Id!== sceneId)
   if (currentSceneId.value === sceneId) {
     currentSceneId.value = projectData.value.scenes[0]?.Id
   }
@@ -161,14 +157,16 @@ function addChoice() {
   })
 }
 
-function removeChoice(index: number) {
+function removeChoice(index) {
   if (!currentScene.value?.Choices) return
   currentScene.value.Choices.splice(index, 1)
 }
 
 onMounted(async () => {
   await loadRecentProjects()
+  // NIE ŁADUJEMY automatycznie last_project - użytkownik ma wybrać z launchera
   showLauncher.value = true
+  showNewProjectModal.value = false
 })
 </script>
 
@@ -252,8 +250,8 @@ onMounted(async () => {
         <div v-if="!currentScene?.Choices || currentScene.Choices.length === 0" class="no-choices">Brak wyborów</div>
         <div v-for="(choice, idx) in currentScene?.Choices || []" :key="idx" class="choice-item">
           <div class="choice-edit">
-            <input :value="choice.Text" @input="currentScene.Choices[idx].Text = ($event.target as HTMLInputElement).value" placeholder="Tekst wyboru" />
-            <select :value="choice.Target" @change="currentScene.Choices[idx].Target = ($event.target as HTMLSelectElement).value">
+            <input :value="choice.Text" @input="currentScene.Choices[idx].Text = $event.target.value" placeholder="Tekst wyboru" />
+            <select :value="choice.Target" @change="currentScene.Choices[idx].Target = $event.target.value">
               <option v-for="s in projectData.scenes" :key="s.Id" :value="s.Id">{{ s.Id }} - {{ s.SceneTitle }}</option>
             </select>
           </div>
