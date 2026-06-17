@@ -14,6 +14,9 @@ const showNewProjectModal = ref(false)
 const newProjectName = ref('')
 const availableBackgrounds = ref([])
 const saveStatus = ref('')
+const bgExists = ref(false)
+
+const editorBgPath = '/editor_bg.png'
 
 const currentScene = computed(() => {
   if (!projectData.value) return null
@@ -30,7 +33,6 @@ const autoSave = debounce(async () => {
     await writeTextFile(path, json)
     saveStatus.value = 'Zapisano'
     setTimeout(() => { saveStatus.value = '' }, 2000)
-    console.log('[AUTO-SAVE]', path)
   } catch (e) {
     saveStatus.value = 'Błąd zapisu!'
     console.error('[AUTO-SAVE]', e)
@@ -38,6 +40,22 @@ const autoSave = debounce(async () => {
 }, 1000)
 
 watch(projectData, () => { autoSave() }, { deep: true })
+
+async function checkBackground() {
+  try {
+    const img = new Image()
+    img.src = editorBgPath
+    await new Promise((resolve, reject) => {
+      img.onload = resolve
+      img.onerror = reject
+    })
+    bgExists.value = true
+    console.log('[BG] Tło załadowane:', editorBgPath)
+  } catch {
+    console.warn('[BG] Brak public/editor_bg.png - używam samego overlayu')
+    bgExists.value = false
+  }
+}
 
 async function loadRecentProjects() {
   try {
@@ -55,7 +73,7 @@ async function loadProject(path) {
     currentProjectPath.value = path
     currentSceneId.value = projectData.value.scenes[0]?.Id || null
     showLauncher.value = false
-    showNewProjectModal.value = false // <- TO JEST KLUCZOWE
+    showNewProjectModal.value = false
     await scanBackgrounds()
     console.log('[PROJ] Wczytano:', path)
   } catch (e) {
@@ -72,15 +90,21 @@ async function openProjectDialog() {
 }
 
 async function createProject() {
-  if (!newProjectName.value.trim()) return
+  console.log('[CREATE] Kliknięto Stwórz')
+  if (!newProjectName.value.trim()) {
+    alert('Wpisz nazwę projektu')
+    return
+  }
   try {
     const path = await invoke('create_new_project', { name: newProjectName.value })
+    console.log('[CREATE] Utworzono:', path)
     await loadProject(path)
     showNewProjectModal.value = false
     newProjectName.value = ''
     await loadRecentProjects()
   } catch (e) {
-    alert('Błąd: ' + e)
+    console.error('[CREATE] Błąd:', e)
+    alert('Błąd tworzenia: ' + e)
   }
 }
 
@@ -101,7 +125,7 @@ async function saveProject() {
 }
 
 function getAssetUrl(assetName) {
-  if (!currentProjectPath.value ||!assetName) return ''
+  if (!currentProjectPath.value ||!assetName) return '/assets/placeholders/no_bg.jpg'
   const fullPath = `${currentProjectPath.value}/assets/backgrounds/${assetName}.jpg`
   return convertFileSrc(fullPath)
 }
@@ -112,8 +136,8 @@ async function scanBackgrounds() {
     const bgPath = `${currentProjectPath.value}/assets/backgrounds`
     const entries = await readDir(bgPath)
     availableBackgrounds.value = entries
-   .filter(e => e.name.endsWith('.jpg') || e.name.endsWith('.png'))
-   .map(e => e.name.replace(/\.[^/.]+$/, ""))
+     .filter(e => e.name.endsWith('.jpg') || e.name.endsWith('.png'))
+     .map(e => e.name.replace(/\.[^/.]+$/, ""))
   } catch (e) {
     console.error('[PROJ] Błąd skanowania teł:', e)
     availableBackgrounds.value = []
@@ -163,141 +187,222 @@ function removeChoice(index) {
 }
 
 onMounted(async () => {
+  await checkBackground()
   await loadRecentProjects()
-  // NIE ŁADUJEMY automatycznie last_project - użytkownik ma wybrać z launchera
   showLauncher.value = true
   showNewProjectModal.value = false
 })
 </script>
 
 <template>
-  <!-- LAUNCHER -->
-  <div v-if="showLauncher" class="launcher">
-    <div class="launcher-content">
-      <h1>Edytor Janusza V1.2</h1>
-      <div class="launcher-buttons">
-        <button @click="showNewProjectModal = true" class="btn-primary">+ Nowy Projekt</button>
-        <button @click="openProjectDialog">📂 Otwórz Projekt</button>
-      </div>
-      <div v-if="recentProjects.length" class="recent">
-        <h3>Ostatnie projekty:</h3>
-        <div v-for="p in recentProjects" :key="p" @click="loadProject(p)" class="recent-item">
-          {{ p.split('\\').pop() }}
+  <div
+    v-if="bgExists"
+    class="bg-wrapper"
+    :style="{ backgroundImage: `url(${editorBgPath})` }"
+  ></div>
+
+  <div class="app-container">
+    <div v-if="showLauncher" class="launcher">
+      <div class="launcher-content">
+        <h1>Edytor Janusza V1.2</h1>
+        <div class="launcher-buttons">
+          <button @click="showNewProjectModal = true" class="btn-primary">+ Nowy Projekt</button>
+          <button @click="openProjectDialog">📂 Otwórz Projekt</button>
+        </div>
+        <div v-if="recentProjects.length" class="recent">
+          <h3>Ostatnie projekty:</h3>
+          <div v-for="p in recentProjects" :key="p" @click="loadProject(p)" class="recent-item">
+            {{ p.split('\\').pop() }}
+          </div>
         </div>
       </div>
     </div>
-  </div>
 
-  <!-- EDYTOR -->
-  <div v-else class="editor">
-    <header class="top-bar">
-      <h1>Edytor Janusza V1.2</h1>
-      <div class="toolbar">
-        <button @click="showLauncher = true">🏠 Menu</button>
-        <button @click="saveProject" :disabled="!currentProjectPath">💾 Zapisz</button>
-        <button @click="addScene">+ Scena</button>
-        <span class="save-status">{{ saveStatus }}</span>
-      </div>
-      <div v-if="currentProjectPath" class="project-path">{{ currentProjectPath }}</div>
-    </header>
-
-    <div v-if="showNewProjectModal" class="modal">
+    <div v-if="showNewProjectModal" class="modal" @click.self="showNewProjectModal = false">
       <div class="modal-content">
         <h3>Nowy projekt Janusza</h3>
-        <input v-model="newProjectName" placeholder="Nazwa projektu" @keyup.enter="createProject" autofocus />
-        <button @click="createProject">Stwórz</button>
-        <button @click="showNewProjectModal = false">Anuluj</button>
+        <input
+          v-model="newProjectName"
+          placeholder="Nazwa projektu"
+          @keyup.enter="createProject"
+          @keyup.esc="showNewProjectModal = false"
+          autofocus
+        />
+        <div class="modal-buttons">
+          <button @click="createProject" class="btn-primary">Stwórz</button>
+          <button @click="showNewProjectModal = false">Anuluj</button>
+        </div>
       </div>
     </div>
 
-    <div v-if="projectData" class="main-grid">
-      <aside class="scenes-panel">
-        <h3>Sceny [{{ projectData.scenes.length }}]</h3>
-        <div v-for="scene in projectData.scenes" :key="scene.Id" :class="['scene-item', { active: scene.Id === currentSceneId }]" @click="goToScene(scene.Id)">
-          <div class="scene-id">{{ scene.Id }}</div>
-          <div class="scene-title">{{ scene.SceneTitle }}</div>
-          <button @click.stop="deleteScene(scene.Id)" class="btn-delete-mini">✕</button>
+    <div v-else-if="!showLauncher" class="editor">
+      <header class="top-bar">
+        <h1>Edytor Janusza V1.2</h1>
+        <div class="toolbar">
+          <button @click="showLauncher = true">🏠 Menu</button>
+          <button @click="saveProject" :disabled="!currentProjectPath">💾 Zapisz</button>
+          <button @click="addScene">+ Scena</button>
+          <span class="save-status">{{ saveStatus }}</span>
         </div>
-      </aside>
+        <div v-if="currentProjectPath" class="project-path">{{ currentProjectPath }}</div>
+      </header>
 
-      <main class="editor-panel">
-        <div v-if="currentScene">
-          <div class="bg-preview">
-            <img v-if="currentScene.Background" :src="getAssetUrl(currentScene.Background)" alt="tło" />
-            <div v-else class="no-bg">Brak tła</div>
-            <div class="bg-label">{{ currentScene.Background || 'brak' }}</div>
+      <div v-if="projectData" class="main-grid">
+        <aside class="scenes-panel">
+          <h3>Sceny [{{ projectData.scenes.length }}]</h3>
+          <div v-for="scene in projectData.scenes" :key="scene.Id" :class="['scene-item', { active: scene.Id === currentSceneId }]" @click="goToScene(scene.Id)">
+            <div class="scene-id">{{ scene.Id }}</div>
+            <div class="scene-title">{{ scene.SceneTitle }}</div>
+            <button @click.stop="deleteScene(scene.Id)" class="btn-delete-mini">✕</button>
           </div>
-          <div class="scene-form">
-            <div class="form-row"><label>ID Sceny:</label><input v-model="currentScene.Id" /></div>
-            <div class="form-row"><label>Tytuł sceny:</label><input v-model="currentScene.SceneTitle" /></div>
-            <div class="form-row">
-              <label>Tło:</label>
-              <select v-model="currentScene.Background">
-                <option value="">Brak</option>
-                <option v-for="bg in availableBackgrounds" :key="bg" :value="bg">{{ bg }}</option>
+        </aside>
+
+        <main class="editor-panel">
+          <div v-if="currentScene">
+            <div class="bg-preview">
+              <img v-if="currentScene.Background" :src="getAssetUrl(currentScene.Background)" alt="tło" />
+              <div v-else class="no-bg">Brak tła</div>
+              <div class="bg-label">{{ currentScene.Background || 'brak' }}</div>
+            </div>
+            <div class="scene-form">
+              <div class="form-row"><label>ID Sceny:</label><input v-model="currentScene.Id" /></div>
+              <div class="form-row"><label>Tytuł sceny:</label><input v-model="currentScene.SceneTitle" /></div>
+              <div class="form-row">
+                <label>Tło:</label>
+                <select v-model="currentScene.Background">
+                  <option value="">Brak</option>
+                  <option v-for="bg in availableBackgrounds" :key="bg" :value="bg">{{ bg }}</option>
+                </select>
+              </div>
+              <div class="form-row"><label>Tekst sceny:</label><textarea v-model="currentScene.Text" rows="8"></textarea></div>
+            </div>
+          </div>
+        </main>
+
+        <aside class="choices-panel">
+          <div class="choices-header">
+            <h3>Wybory</h3>
+            <button @click="addChoice" class="btn-add">+ Dodaj</button>
+          </div>
+          <div v-if="!currentScene?.Choices || currentScene.Choices.length === 0" class="no-choices">Brak wyborów</div>
+          <div v-for="(choice, idx) in currentScene?.Choices || []" :key="idx" class="choice-item">
+            <div class="choice-edit">
+              <input :value="choice.Text" @input="currentScene.Choices[idx].Text = $event.target.value" placeholder="Tekst wyboru" />
+              <select :value="choice.Target" @change="currentScene.Choices[idx].Target = $event.target.value">
+                <option v-for="s in projectData.scenes" :key="s.Id" :value="s.Id">{{ s.Id }} - {{ s.SceneTitle }}</option>
               </select>
             </div>
-            <div class="form-row"><label>Tekst sceny:</label><textarea v-model="currentScene.Text" rows="8"></textarea></div>
+            <div class="choice-actions">
+              <button @click="goToScene(choice.Target)">Idź →</button>
+              <button @click="removeChoice(idx)" class="btn-delete">✕</button>
+            </div>
           </div>
-        </div>
-      </main>
-
-      <aside class="choices-panel">
-        <div class="choices-header">
-          <h3>Wybory</h3>
-          <button @click="addChoice" class="btn-add">+ Dodaj</button>
-        </div>
-        <div v-if="!currentScene?.Choices || currentScene.Choices.length === 0" class="no-choices">Brak wyborów</div>
-        <div v-for="(choice, idx) in currentScene?.Choices || []" :key="idx" class="choice-item">
-          <div class="choice-edit">
-            <input :value="choice.Text" @input="currentScene.Choices[idx].Text = $event.target.value" placeholder="Tekst wyboru" />
-            <select :value="choice.Target" @change="currentScene.Choices[idx].Target = $event.target.value">
-              <option v-for="s in projectData.scenes" :key="s.Id" :value="s.Id">{{ s.Id }} - {{ s.SceneTitle }}</option>
-            </select>
-          </div>
-          <div class="choice-actions">
-            <button @click="goToScene(choice.Target)">Idź →</button>
-            <button @click="removeChoice(idx)" class="btn-delete">✕</button>
-          </div>
-        </div>
-      </aside>
+        </aside>
+      </div>
     </div>
   </div>
 </template>
 
 <style scoped>
-.launcher { position: fixed; inset: 0; background: #0a1628; display: flex; align-items: center; justify-content: center; z-index: 200; }
-.launcher-content { text-align: center; }
-.launcher h1 { color: #4ade80; font-size: 32px; margin-bottom: 32px; }
+.bg-wrapper {
+  position: fixed;
+  inset: 0;
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+  z-index: -2;
+}
+.bg-wrapper::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: rgba(10, 22, 40, 0.25); /* było 0.82 - teraz tylko 25% */
+  pointer-events: none;
+}
+
+.app-container {
+  position: relative;
+  min-height: 100vh;
+  z-index: 1;
+}
+.launcher {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+  background: rgba(10, 22, 40, 0.3); /* było 0.4 */
+  /* USUNIĘTE: backdrop-filter: blur(2px); */
+}
+.launcher-content { text-align: center; position: relative; z-index: 1; }
+.launcher h1 { color: #4ade80; font-size: 48px; margin-bottom: 32px; text-shadow: 0 0 20px rgba(74, 222, 128, 0.5); }
 .launcher-buttons { display: flex; flex-direction: column; gap: 12px; width: 300px; margin: 0 auto; }
-.launcher-buttons button { padding: 16px; font-size: 16px; cursor: pointer; background: #1e293b; border: 2px solid #334155; color: #fff; }
-.launcher-buttons button:hover { background: #334155; border-color: #16a34a; }
+.launcher-buttons button { padding: 16px; font-size: 16px; cursor: pointer; background: rgba(30, 41, 59, 0.9); border: 2px solid #334155; color: #fff; transition: all 0.2s; }
+.launcher-buttons button:hover { background: rgba(51, 65, 85, 0.95); border-color: #16a34a; transform: translateY(-2px); }
 .btn-primary { background: #16a34a!important; border-color: #16a34a!important; }
-.btn-primary:hover { background: #22c55e!important; }
+.btn-primary:hover { background: #22c55e!important; box-shadow: 0 0 15px rgba(34, 197, 94, 0.4); }
 .recent { margin-top: 32px; }
 .recent h3 { color: #94a3b8; font-size: 14px; margin-bottom: 12px; }
-.recent-item { padding: 8px; background: #1e293b; margin-bottom: 6px; cursor: pointer; font-family: monospace; font-size: 12px; }
-.recent-item:hover { background: #334155; color: #4ade80; }
+.recent-item { padding: 8px; background: rgba(30, 41, 59, 0.9); margin-bottom: 6px; cursor: pointer; font-family: monospace; font-size: 12px; }
+.recent-item:hover { background: rgba(51, 65, 85, 0.95); color: #4ade80; }
 
-.editor { background: #0a1628; color: #fff; min-height: 100vh; display: flex; flex-direction: column; }
-.top-bar { padding: 12px 20px; border-bottom: 2px solid #16a34a; }
-.top-bar h1 { margin: 0 0 8px 0; font-size: 20px; }
+.modal { position: fixed; inset: 0; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 300; }
+.modal-content { background: #1e293b; padding: 24px; border-radius: 8px; border: 2px solid #16a34a; min-width: 400px; }
+.modal-content h3 { margin: 0 0 16px 0; color: #4ade80; }
+.modal-content input { width: 100%; padding: 12px; margin: 12px 0; background: #0a1628; border: 1px solid #334155; color: #fff; font-size: 14px; }
+.modal-content input:focus { outline: none; border-color: #16a34a; }
+.modal-buttons { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+.modal-buttons button { padding: 8px 16px; cursor: pointer; }
+
+.editor {
+  color: #fff;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+.top-bar {
+  padding: 12px 20px;
+  border-bottom: 2px solid #16a34a;
+  background: rgba(30, 41, 59, 0.85); /* było 0.5 */
+  /* USUNIĘTE: backdrop-filter: blur(12px); <-- TO ROBIŁO NAJWIĘKSZE MYDŁO */
+}
+.top-bar h1 { margin: 0 0 8px 0; font-size: 20px; text-shadow: 0 0 10px rgba(74, 222, 128, 0.3); }
 .toolbar { display: flex; gap: 8px; align-items: center; }
-.toolbar button { padding: 6px 12px; background: #1e293b; border: 1px solid #334155; color: #fff; cursor: pointer; }
-.toolbar button:hover { background: #334155; }
+.toolbar button { padding: 6px 12px; background: rgba(30, 41, 59, 0.95); border: 1px solid #334155; color: #fff; cursor: pointer; transition: all 0.2s; }
+.toolbar button:hover { background: #16a34a; border-color: #16a34a; }
 .toolbar button:disabled { opacity: 0.4; cursor: not-allowed; }
 .save-status { color: #4ade80; font-size: 12px; margin-left: 12px; }
-.project-path { font-size: 11px; color: #4ade80; margin-top: 6px; font-family: monospace; }
-.modal { position: fixed; inset: 0; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 100; }
-.modal-content { background: #1e293b; padding: 24px; border-radius: 8px; border: 2px solid #16a34a; }
-.modal-content input { width: 300px; padding: 8px; margin: 12px 0; background: #0a1628; border: 1px solid #334155; color: #fff; }
-.modal-content button { margin-right: 8px; padding: 6px 12px; }
-.main-grid { display: grid; grid-template-columns: 250px 1fr 350px; gap: 1px; background: #16a34a; flex: 1; overflow: hidden; }
-.scenes-panel,.editor-panel,.choices-panel { background: #0a1628; padding: 16px; overflow-y: auto; }
+.project-path { font-size: 11px; color: #4ade80; margin-top: 6px; font-family: monospace; opacity: 0.7; }
+.main-grid {
+  display: grid;
+  grid-template-columns: 250px 1fr 350px;
+  gap: 1px;
+  background: rgba(22, 163, 74, 0.2);
+  flex: 1;
+  overflow: hidden;
+}
+.scenes-panel,.editor-panel,.choices-panel {
+  background: rgba(10, 22, 40, 0.75); /* było 0.55 - mniej przezroczyste = czytelniej */
+  /* USUNIĘTE: backdrop-filter: blur(10px); */
+  padding: 16px;
+  overflow-y: auto;
+  border: 1px solid rgba(51, 65, 85, 0.3);
+}
 .scenes-panel h3,.choices-panel h3 { margin: 0 0 12px 0; color: #4ade80; font-size: 14px; }
-.scene-item { padding: 10px; background: #1e293b; margin-bottom: 6px; cursor: pointer; border-left: 3px solid transparent; position: relative; }
-.scene-item:hover { background: #334155; }
-.scene-item.active { background: #16a34a; border-left-color: #4ade80; }
+.scene-item {
+  padding: 10px;
+  background: rgba(30, 41, 59, 0.8); /* było 0.5 */
+  margin-bottom: 6px;
+  cursor: pointer;
+  border-left: 3px solid transparent;
+  position: relative;
+  transition: all 0.2s;
+}
+.scene-item:hover { background: rgba(51, 65, 85, 0.9); border-left-color: #4ade80; }
+.scene-item.active { background: rgba(22, 163, 74, 0.8); border-left-color: #4ade80; }
 .scene-id { font-family: monospace; font-size: 11px; color: #94a3b8; }
 .scene-title { font-size: 13px; margin-top: 2px; }
 .btn-delete-mini { position: absolute; right: 6px; top: 6px; background: #dc2626; border: none; color: #fff; font-size: 10px; padding: 2px 6px; cursor: pointer; }
@@ -308,14 +413,20 @@ onMounted(async () => {
 .scene-form { display: flex; flex-direction: column; gap: 12px; }
 .form-row { display: flex; flex-direction: column; gap: 4px; }
 .form-row label { color: #4ade80; font-size: 12px; font-weight: bold; }
-.form-row input,.form-row select,.form-row textarea { background: #1e293b; border: 1px solid #334155; color: #fff; padding: 8px; font-family: inherit; }
-.form-row input:focus,.form-row select:focus,.form-row textarea:focus { outline: none; border-color: #16a34a; }
+.form-row input,.form-row select,.form-row textarea {
+  background: rgba(30, 41, 59, 0.95); /* było 0.8 */
+  border: 1px solid #334155;
+  color: #fff;
+  padding: 8px;
+  font-family: inherit;
+}
+.form-row input:focus,.form-row select:focus,.form-row textarea:focus { outline: none; border-color: #16a34a; box-shadow: 0 0 5px rgba(22, 163, 74, 0.3); }
 .choices-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
 .btn-add { padding: 4px 10px; background: #16a34a; border: none; color: #fff; cursor: pointer; font-size: 12px; }
 .btn-add:hover { background: #22c55e; }
-.choice-item { background: #1e293b; padding: 12px; margin-bottom: 8px; border-left: 3px solid #16a34a; }
+.choice-item { background: rgba(30, 41, 59, 0.8); padding: 12px; margin-bottom: 8px; border-left: 3px solid #16a34a; }
 .choice-edit { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
-.choice-edit input,.choice-edit select { background: #0a1628; border: 1px solid #334155; color: #fff; padding: 6px; font-size: 12px; }
+.choice-edit input,.choice-edit select { background: rgba(10, 22, 40, 0.95); border: 1px solid #334155; color: #fff; padding: 6px; font-size: 12px; }
 .choice-actions { display: flex; gap: 6px; }
 .choice-actions button { padding: 4px 8px; font-size: 11px; cursor: pointer; }
 .btn-delete { background: #dc2626; border: none; color: #fff; }

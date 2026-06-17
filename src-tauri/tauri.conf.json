@@ -1,8 +1,8 @@
 {
-  "$schema": "https://schema.tauri.app/config/2",
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "janusz-editor",
   "version": "0.1.0",
-  "identifier": "xseper",
+  "identifier": "com.janusz.editor",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -12,39 +12,23 @@
   "app": {
     "windows": [
       {
-        "label": "main",
-        "title": "janusz-editor",
-        "width": 1200,
-        "height": 800,
-        "resizable": true
+        "title": "Edytor Janusza V1.2",
+        "width": 1400,
+        "height": 900,
+        "resizable": true,
+        "fullscreen": false
       }
     ],
     "security": {
-      "csp": "default-src 'self' ipc: http://ipc.localhost; img-src 'self' asset: https://asset.localhost data: blob: file:; style-src 'self' 'unsafe-inline'",
+      "csp": null,
       "assetProtocol": {
         "enable": true,
-        "scope": [
-          "$APPDATA/**",
-          "$RESOURCE/**", 
-          "$APP/**",
-          "$DOCUMENT/**",
-          "C:/Users/**"
-        ]
+        "scope": ["**"]
       }
     }
   },
   "bundle": {
     "active": true,
-    "targets": "all",
-    "resources": [
-      "resources/templates/tutorial_bg.jpg"
-    ],
-    "icon": [
-      "icons/32x32.png",
-      "icons/128x128.png",
-      "icons/128x128@2x.png",
-      "icons/icon.icns",
-      "icons/icon.ico"
-    ]
+    "targets": "all"
   }
 }
