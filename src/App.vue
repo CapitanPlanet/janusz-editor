@@ -1,45 +1,24 @@
 <script setup>
-import { ref, onMounted, computed, watch } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { invoke, convertFileSrc } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
-import { writeTextFile, readDir } from '@tauri-apps/plugin-fs'
 import { debounce } from 'lodash-es'
+import { useProjectStore } from './stores/projectStore'
+
+const store = useProjectStore()
 
 const showLauncher = ref(true)
 const recentProjects = ref([])
-const currentProjectPath = ref(null)
-const projectData = ref(null)
-const currentSceneId = ref(null)
 const showNewProjectModal = ref(false)
 const newProjectName = ref('')
-const availableBackgrounds = ref([])
-const saveStatus = ref('')
 const bgExists = ref(false)
-
 const editorBgPath = '/editor_bg.png'
 
-const currentScene = computed(() => {
-  if (!projectData.value) return null
-  return projectData.value.scenes.find(s => s.Id === currentSceneId.value)
-})
-
 const autoSave = debounce(async () => {
-  if (!currentProjectPath.value ||!projectData.value) return
-  saveStatus.value = 'Zapisywanie...'
-  try {
-    const cleanData = JSON.parse(JSON.stringify(projectData.value))
-    const json = JSON.stringify(cleanData, null, 2)
-    const path = `${currentProjectPath.value}/project.json`
-    await writeTextFile(path, json)
-    saveStatus.value = 'Zapisano'
-    setTimeout(() => { saveStatus.value = '' }, 2000)
-  } catch (e) {
-    saveStatus.value = 'Błąd zapisu!'
-    console.error('[AUTO-SAVE]', e)
-  }
+  await store.saveProject()
 }, 1000)
 
-watch(projectData, () => { autoSave() }, { deep: true })
+watch(() => store.projectData, () => { autoSave() }, { deep: true })
 
 async function checkBackground() {
   try {
@@ -50,9 +29,7 @@ async function checkBackground() {
       img.onerror = reject
     })
     bgExists.value = true
-    console.log('[BG] Tło załadowane:', editorBgPath)
   } catch {
-    console.warn('[BG] Brak public/editor_bg.png - używam samego overlayu')
     bgExists.value = false
   }
 }
@@ -66,124 +43,79 @@ async function loadRecentProjects() {
   }
 }
 
-async function loadProject(path) {
-  try {
-    const json = await invoke('load_project', { path })
-    projectData.value = JSON.parse(json)
-    currentProjectPath.value = path
-    currentSceneId.value = projectData.value.scenes[0]?.Id || null
-    showLauncher.value = false
-    showNewProjectModal.value = false
-    await scanBackgrounds()
-    console.log('[PROJ] Wczytano:', path)
-  } catch (e) {
-    alert('Błąd wczytywania: ' + e)
-  }
-}
-
 async function openProjectDialog() {
   const selected = await open({
     directory: true,
     defaultPath: 'C:\\Users\\MD-Core\\OneDrive\\Dokumenty\\Janusz Projects'
   })
-  if (selected) await loadProject(selected)
+  if (selected) {
+    await store.loadProject(selected)
+    showLauncher.value = false
+  }
 }
 
 async function createProject() {
-  console.log('[CREATE] Kliknięto Stwórz')
   if (!newProjectName.value.trim()) {
     alert('Wpisz nazwę projektu')
     return
   }
   try {
     const path = await invoke('create_new_project', { name: newProjectName.value })
-    console.log('[CREATE] Utworzono:', path)
-    await loadProject(path)
+    await store.loadProject(path)
     showNewProjectModal.value = false
     newProjectName.value = ''
+    showLauncher.value = false
     await loadRecentProjects()
   } catch (e) {
-    console.error('[CREATE] Błąd:', e)
     alert('Błąd tworzenia: ' + e)
   }
 }
 
-async function saveProject() {
-  if (!currentProjectPath.value ||!projectData.value) return
-  saveStatus.value = 'Zapisywanie...'
-  try {
-    const cleanData = JSON.parse(JSON.stringify(projectData.value))
-    const json = JSON.stringify(cleanData, null, 2)
-    const path = `${currentProjectPath.value}/project.json`
-    await writeTextFile(path, json)
-    saveStatus.value = 'Zapisano!'
-    setTimeout(() => { saveStatus.value = '' }, 2000)
-  } catch (e) {
-    saveStatus.value = 'Błąd!'
-    alert('Błąd zapisu: ' + e)
-  }
-}
-
 function getAssetUrl(assetName) {
-  if (!currentProjectPath.value ||!assetName) return '/assets/placeholders/no_bg.jpg'
-  const fullPath = `${currentProjectPath.value}/assets/backgrounds/${assetName}.jpg`
+  if (!store.currentProjectPath ||!assetName) return '/assets/placeholders/no_bg.jpg'
+  const fullPath = `${store.currentProjectPath}/assets/backgrounds/${assetName}.jpg`
   return convertFileSrc(fullPath)
 }
 
-async function scanBackgrounds() {
-  if (!currentProjectPath.value) return
-  try {
-    const bgPath = `${currentProjectPath.value}/assets/backgrounds`
-    const entries = await readDir(bgPath)
-    availableBackgrounds.value = entries
-     .filter(e => e.name.endsWith('.jpg') || e.name.endsWith('.png'))
-     .map(e => e.name.replace(/\.[^/.]+$/, ""))
-  } catch (e) {
-    console.error('[PROJ] Błąd skanowania teł:', e)
-    availableBackgrounds.value = []
-  }
-}
-
 function goToScene(sceneId) {
-  currentSceneId.value = sceneId
+  store.currentSceneId = sceneId
 }
 
 function addScene() {
-  if (!projectData.value) return
-  const newId = `dzien_${projectData.value.scenes.length}`
-  projectData.value.scenes.push({
+  const newId = `dzien_${store.projectData.scenes.length}`
+  store.projectData.scenes.push({
     Id: newId,
     SceneTitle: 'Nowa scena',
     Background: '',
     Text: '',
     Choices: []
   })
-  currentSceneId.value = newId
+  store.currentSceneId = newId
 }
 
 function deleteScene(sceneId) {
-  if (!projectData.value || projectData.value.scenes.length <= 1) {
+  if (!store.projectData || store.projectData.scenes.length <= 1) {
     alert('Nie możesz usunąć ostatniej sceny')
     return
   }
-  projectData.value.scenes = projectData.value.scenes.filter(s => s.Id!== sceneId)
-  if (currentSceneId.value === sceneId) {
-    currentSceneId.value = projectData.value.scenes[0]?.Id
+  store.projectData.scenes = store.projectData.scenes.filter(s => s.Id!== sceneId)
+  if (store.currentSceneId === sceneId) {
+    store.currentSceneId = store.projectData.scenes[0]?.Id
   }
 }
 
 function addChoice() {
-  if (!currentScene.value) return
-  if (!currentScene.value.Choices) currentScene.value.Choices = []
-  currentScene.value.Choices.push({
+  if (!store.currentScene) return
+  if (!store.currentScene.Choices) store.currentScene.Choices = []
+  store.currentScene.Choices.push({
     Text: 'Nowy wybór',
-    Target: projectData.value.scenes[0]?.Id || ''
+    Target: store.projectData.scenes[0]?.Id || ''
   })
 }
 
 function removeChoice(index) {
-  if (!currentScene.value?.Choices) return
-  currentScene.value.Choices.splice(index, 1)
+  if (!store.currentScene?.Choices) return
+  store.currentScene.Choices.splice(index, 1)
 }
 
 onMounted(async () => {
@@ -211,7 +143,7 @@ onMounted(async () => {
         </div>
         <div v-if="recentProjects.length" class="recent">
           <h3>Ostatnie projekty:</h3>
-          <div v-for="p in recentProjects" :key="p" @click="loadProject(p)" class="recent-item">
+          <div v-for="p in recentProjects" :key="p" @click="store.loadProject(p).then(() => showLauncher = false)" class="recent-item">
             {{ p.split('\\').pop() }}
           </div>
         </div>
@@ -240,17 +172,17 @@ onMounted(async () => {
         <h1>Edytor Janusza V1.2</h1>
         <div class="toolbar">
           <button @click="showLauncher = true">🏠 Menu</button>
-          <button @click="saveProject" :disabled="!currentProjectPath">💾 Zapisz</button>
+          <button @click="store.saveProject" :disabled="!store.currentProjectPath">💾 Zapisz</button>
           <button @click="addScene">+ Scena</button>
-          <span class="save-status">{{ saveStatus }}</span>
+          <span class="save-status">{{ store.saveStatus }}</span>
         </div>
-        <div v-if="currentProjectPath" class="project-path">{{ currentProjectPath }}</div>
+        <div v-if="store.currentProjectPath" class="project-path">{{ store.currentProjectPath }}</div>
       </header>
 
-      <div v-if="projectData" class="main-grid">
+      <div v-if="store.projectData" class="main-grid">
         <aside class="scenes-panel">
-          <h3>Sceny [{{ projectData.scenes.length }}]</h3>
-          <div v-for="scene in projectData.scenes" :key="scene.Id" :class="['scene-item', { active: scene.Id === currentSceneId }]" @click="goToScene(scene.Id)">
+          <h3>Sceny [{{ store.projectData.scenes.length }}]</h3>
+          <div v-for="scene in store.projectData.scenes" :key="scene.Id" :class="['scene-item', { active: scene.Id === store.currentSceneId }]" @click="goToScene(scene.Id)">
             <div class="scene-id">{{ scene.Id }}</div>
             <div class="scene-title">{{ scene.SceneTitle }}</div>
             <button @click.stop="deleteScene(scene.Id)" class="btn-delete-mini">✕</button>
@@ -258,23 +190,23 @@ onMounted(async () => {
         </aside>
 
         <main class="editor-panel">
-          <div v-if="currentScene">
+          <div v-if="store.currentScene">
             <div class="bg-preview">
-              <img v-if="currentScene.Background" :src="getAssetUrl(currentScene.Background)" alt="tło" />
+              <img v-if="store.currentScene.Background" :src="getAssetUrl(store.currentScene.Background)" alt="tło" />
               <div v-else class="no-bg">Brak tła</div>
-              <div class="bg-label">{{ currentScene.Background || 'brak' }}</div>
+              <div class="bg-label">{{ store.currentScene.Background || 'brak' }}</div>
             </div>
             <div class="scene-form">
-              <div class="form-row"><label>ID Sceny:</label><input v-model="currentScene.Id" /></div>
-              <div class="form-row"><label>Tytuł sceny:</label><input v-model="currentScene.SceneTitle" /></div>
+              <div class="form-row"><label>ID Sceny:</label><input v-model="store.currentScene.Id" /></div>
+              <div class="form-row"><label>Tytuł sceny:</label><input v-model="store.currentScene.SceneTitle" /></div>
               <div class="form-row">
                 <label>Tło:</label>
-                <select v-model="currentScene.Background">
+                <select v-model="store.currentScene.Background">
                   <option value="">Brak</option>
-                  <option v-for="bg in availableBackgrounds" :key="bg" :value="bg">{{ bg }}</option>
+                  <option v-for="bg in store.availableBackgrounds" :key="bg" :value="bg">{{ bg }}</option>
                 </select>
               </div>
-              <div class="form-row"><label>Tekst sceny:</label><textarea v-model="currentScene.Text" rows="8"></textarea></div>
+              <div class="form-row"><label>Tekst sceny:</label><textarea v-model="store.currentScene.Text" rows="8"></textarea></div>
             </div>
           </div>
         </main>
@@ -284,12 +216,12 @@ onMounted(async () => {
             <h3>Wybory</h3>
             <button @click="addChoice" class="btn-add">+ Dodaj</button>
           </div>
-          <div v-if="!currentScene?.Choices || currentScene.Choices.length === 0" class="no-choices">Brak wyborów</div>
-          <div v-for="(choice, idx) in currentScene?.Choices || []" :key="idx" class="choice-item">
+          <div v-if="!store.currentScene?.Choices || store.currentScene.Choices.length === 0" class="no-choices">Brak wyborów</div>
+          <div v-for="(choice, idx) in store.currentScene?.Choices || []" :key="idx" class="choice-item">
             <div class="choice-edit">
-              <input :value="choice.Text" @input="currentScene.Choices[idx].Text = $event.target.value" placeholder="Tekst wyboru" />
-              <select :value="choice.Target" @change="currentScene.Choices[idx].Target = $event.target.value">
-                <option v-for="s in projectData.scenes" :key="s.Id" :value="s.Id">{{ s.Id }} - {{ s.SceneTitle }}</option>
+              <input :value="choice.Text" @input="store.currentScene.Choices[idx].Text = $event.target.value" placeholder="Tekst wyboru" />
+              <select :value="choice.Target" @change="store.currentScene.Choices[idx].Target = $event.target.value">
+                <option v-for="s in store.projectData.scenes" :key="s.Id" :value="s.Id">{{ s.Id }} - {{ s.SceneTitle }}</option>
               </select>
             </div>
             <div class="choice-actions">
@@ -304,6 +236,7 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+/* Twój CSS zostaw bez zmian */
 .bg-wrapper {
   position: fixed;
   inset: 0;
@@ -317,10 +250,9 @@ onMounted(async () => {
   content: '';
   position: absolute;
   inset: 0;
-  background: rgba(10, 22, 40, 0.25); /* było 0.82 - teraz tylko 25% */
+  background: rgba(10, 22, 40, 0.25);
   pointer-events: none;
 }
-
 .app-container {
   position: relative;
   min-height: 100vh;
@@ -333,8 +265,7 @@ onMounted(async () => {
   align-items: center;
   justify-content: center;
   z-index: 200;
-  background: rgba(10, 22, 40, 0.3); /* było 0.4 */
-  /* USUNIĘTE: backdrop-filter: blur(2px); */
+  background: rgba(10, 22, 40, 0.3);
 }
 .launcher-content { text-align: center; position: relative; z-index: 1; }
 .launcher h1 { color: #4ade80; font-size: 48px; margin-bottom: 32px; text-shadow: 0 0 20px rgba(74, 222, 128, 0.5); }
@@ -347,7 +278,6 @@ onMounted(async () => {
 .recent h3 { color: #94a3b8; font-size: 14px; margin-bottom: 12px; }
 .recent-item { padding: 8px; background: rgba(30, 41, 59, 0.9); margin-bottom: 6px; cursor: pointer; font-family: monospace; font-size: 12px; }
 .recent-item:hover { background: rgba(51, 65, 85, 0.95); color: #4ade80; }
-
 .modal { position: fixed; inset: 0; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 300; }
 .modal-content { background: #1e293b; padding: 24px; border-radius: 8px; border: 2px solid #16a34a; min-width: 400px; }
 .modal-content h3 { margin: 0 0 16px 0; color: #4ade80; }
@@ -355,7 +285,6 @@ onMounted(async () => {
 .modal-content input:focus { outline: none; border-color: #16a34a; }
 .modal-buttons { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
 .modal-buttons button { padding: 8px 16px; cursor: pointer; }
-
 .editor {
   color: #fff;
   min-height: 100vh;
@@ -366,8 +295,7 @@ onMounted(async () => {
 .top-bar {
   padding: 12px 20px;
   border-bottom: 2px solid #16a34a;
-  background: rgba(30, 41, 59, 0.85); /* było 0.5 */
-  /* USUNIĘTE: backdrop-filter: blur(12px); <-- TO ROBIŁO NAJWIĘKSZE MYDŁO */
+  background: rgba(30, 41, 59, 0.85);
 }
 .top-bar h1 { margin: 0 0 8px 0; font-size: 20px; text-shadow: 0 0 10px rgba(74, 222, 128, 0.3); }
 .toolbar { display: flex; gap: 8px; align-items: center; }
@@ -385,8 +313,7 @@ onMounted(async () => {
   overflow: hidden;
 }
 .scenes-panel,.editor-panel,.choices-panel {
-  background: rgba(10, 22, 40, 0.75); /* było 0.55 - mniej przezroczyste = czytelniej */
-  /* USUNIĘTE: backdrop-filter: blur(10px); */
+  background: rgba(10, 22, 40, 0.75);
   padding: 16px;
   overflow-y: auto;
   border: 1px solid rgba(51, 65, 85, 0.3);
@@ -394,7 +321,7 @@ onMounted(async () => {
 .scenes-panel h3,.choices-panel h3 { margin: 0 0 12px 0; color: #4ade80; font-size: 14px; }
 .scene-item {
   padding: 10px;
-  background: rgba(30, 41, 59, 0.8); /* było 0.5 */
+  background: rgba(30, 41, 59, 0.8);
   margin-bottom: 6px;
   cursor: pointer;
   border-left: 3px solid transparent;
@@ -414,7 +341,7 @@ onMounted(async () => {
 .form-row { display: flex; flex-direction: column; gap: 4px; }
 .form-row label { color: #4ade80; font-size: 12px; font-weight: bold; }
 .form-row input,.form-row select,.form-row textarea {
-  background: rgba(30, 41, 59, 0.95); /* było 0.8 */
+  background: rgba(30, 41, 59, 0.95);
   border: 1px solid #334155;
   color: #fff;
   padding: 8px;
