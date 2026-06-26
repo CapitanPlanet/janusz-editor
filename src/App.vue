@@ -186,6 +186,11 @@ onMounted(async () => {
             <div class="scene-id">{{ scene.Id }}</div>
             <div class="scene-title">{{ scene.SceneTitle }}</div>
             <button @click.stop="deleteScene(scene.Id)" class="btn-delete-mini">✕</button>
+
+  <div class="scene-id">{{ scene.Id }}</div>
+  <div class="scene-title">{{ scene.SceneTitle }}</div>
+  <button @click.stop="store.duplicateScene(scene.Id)" class="btn-duplicate-mini" title="Duplikuj">⧉</button>
+  <button @click.stop="deleteScene(scene.Id)" class="btn-delete-mini">✕</button>
           </div>
         </aside>
 
@@ -359,4 +364,17 @@ onMounted(async () => {
 .btn-delete { background: #dc2626; border: none; color: #fff; }
 .btn-delete:hover { background: #ef4444; }
 .no-choices { color: #64748b; font-style: italic; text-align: center; padding: 20px; }
+
+.btn-duplicate-mini { 
+  position: absolute; 
+  right: 28px; 
+  top: 6px; 
+  background: #2563eb; 
+  border: none; 
+  color: #fff; 
+  font-size: 10px; 
+  padding: 2px 6px; 
+  cursor: pointer; 
+}
+.btn-duplicate-mini:hover { background: #3b82f6; }
 </style>
