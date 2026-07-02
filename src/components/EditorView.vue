@@ -1,9 +1,9 @@
 <script setup>
+import SidePanel from './SidePanel.vue'
 import ScenesPanel from './ScenesPanel.vue'
 import EditorPanel from './EditorPanel.vue' 
 import ChoicesPanel from './ChoicesPanel.vue'
 import { useProjectStore } from '../stores/projectStore'
-
 
 const store = useProjectStore()
 const emit = defineEmits(['go-to-menu'])
@@ -12,15 +12,11 @@ const emit = defineEmits(['go-to-menu'])
 <template>
   <div class="editor">
     <header class="top-bar">
-      <h1>Edytor Janusza V1.2</h1>
-      <div class="toolbar">
-        <button @click="emit('go-to-menu')">🏠 Menu</button>
-        <button @click="store.saveProject">💾 Zapisz</button>
-        <span class="save-status">{{ store.saveStatus }}</span>
-      </div>
+      <!-- ... top-bar bez zmian ... -->
     </header>
 
     <div v-if="store.projectData" class="main-grid">
+      <SidePanel />      <!-- ← DODAJ TO -->
       <ScenesPanel />
       <EditorPanel />
       <ChoicesPanel />
@@ -28,19 +24,30 @@ const emit = defineEmits(['go-to-menu'])
   </div>
 </template>
 
+
+
 <style scoped>
 .editor {
   color: #fff;
-  min-height: 100vh;
+  height: 100vh; /* ZMIANA: height zamiast min-height */
   display: flex;
   flex-direction: column;
   position: relative;
+}
+.main-grid {
+  display: grid;
+  grid-template-columns: 200px 250px 1fr 350px;  /* ← ZMIEŃ TO */
+  gap: 1px;
+  background: rgba(22, 163, 74, 0.2);
+  flex: 1;
+  overflow: hidden;
 }
 
 .top-bar {
   padding: 12px 20px;
   border-bottom: 2px solid #16a34a;
   background: rgba(30, 41, 59, 0.85);
+  flex-shrink: 0; /* ZMIANA: nie ściskaj top-bara */
 }
 
 .top-bar h1 {
@@ -75,13 +82,22 @@ const emit = defineEmits(['go-to-menu'])
   margin-left: 12px;
 }
 
-/* TO JEST KLUCZOWE - GRID NA 3 KOLUMNY */
+.project-path {
+  font-size: 11px;
+  color: #4ade80;
+  margin-top: 6px;
+  font-family: monospace;
+  opacity: 0.7;
+}
+
+/* GRID NA 4 KOLUMNY: SidePanel + Sceny + Edytor + Wybory */
 .main-grid {
   display: grid;
-  grid-template-columns: 250px 1fr 350px;
+  grid-template-columns: 200px 250px 1fr 350px; /* ZMIANA: 4 kolumny */
   gap: 1px;
   background: rgba(22, 163, 74, 0.2);
   flex: 1;
-  overflow: hidden;
+  overflow: hidden; /* ZMIANA: każda kolumna scrolluje osobno */
+  min-height: 0; /* ZMIANA: flex trick żeby działał overflow */
 }
 </style>

@@ -1,64 +1,73 @@
-<script setup lang="ts">
-import { useTabsStore } from '@/stores/tabsStore'
-import { useProjectStore } from '@/stores/projectStore'
+<script setup>
+import { useTabsStore } from '../stores/tabsStore'
+import { useProjectStore } from '../stores/projectStore'
 
 const tabs = useTabsStore()
 const project = useProjectStore()
-
-// Zakładam że project.scenes to Twoje pliki/sceny
 </script>
 
 <template>
-  <div class="side-panel">
-    <div class="panel-header">PROJEKT JANUSZA</div>
+  <aside class="side-panel">
+    <div class="project-header">PROJEKT JANUSZA</div>
     
-    <div 
-      v-for="scene in project.scenes" 
-      :key="scene.id"
-      class="file-item"
-      :class="{ active: tabs.activeFile === scene.path }"
-      @click="tabs.openFile(scene.path)"
-    >
-      <span class="icon">📄</span>
-      {{ scene.name }}.janusz
-      <button 
-        v-if="tabs.openFiles.includes(scene.path)"
-        class="close-btn" 
-        @click.stop="tabs.closeFile(scene.path)"
-      >×</button>
+    <div class="file-tree">
+      <div class="folder">📁 Sceny</div>
+      <div 
+        v-for="scene in project.projectData?.scenes || []"
+        :key="scene.Id"
+        class="file"
+        :title="`${scene.Id}.janusz`"
+        @click="project.currentSceneId = scene.Id" 
+      >
+        📄 {{ scene.Id }}.janusz
+      </div>
     </div>
-  </div>
+  </aside>
 </template>
 
 <style scoped>
 .side-panel {
-  width: 250px;
-  background: #252526;
-  color: #ccc;
-  height: 100vh;
-  border-right: 1px solid #1e1e1e;
+  background: rgba(10, 22, 40, 0.9);
+  padding: 16px 8px;
+  border-right: 1px solid rgba(51, 65, 85, 0.5);
+  overflow-y: auto;
+  overflow-x: hidden;
 }
-.panel-header {
-  padding: 8px 12px;
-  font-size: 11px;
+
+.project-header {
+  color: #4ade80;
+  font-size: 12px;
   font-weight: bold;
-  color: #888;
+  margin: 0 8px 16px 8px;
+  letter-spacing: 1px;
 }
-.file-item {
-  padding: 4px 12px;
+
+.folder {
+  color: #94a3b8;
+  font-size: 11px;
+  margin: 8px 8px 4px 8px;
+  font-weight: bold;
+  text-transform: uppercase;
+}
+
+.file {
+  color: #e2e8f0;
+  font-size: 12px;
+  padding: 6px 8px;
   cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 6px;
+  font-family: monospace;
+  border-radius: 3px;
+  margin: 0 4px;
+  
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-.file-item:hover { background: #2a2d2e; }
-.file-item.active { background: #37373d; }
-.close-btn {
-  margin-left: auto;
-  background: none;
-  border: none;
-  color: #888;
-  cursor: pointer;
+
+.file:hover {
+  background: rgba(51, 65, 85, 0.6);
+  color: #4ade80;
 }
-.close-btn:hover { color: #fff; }
+
+/* WYJEBANE: wszystkie duplikaty poniżej były problemem */
 </style>
