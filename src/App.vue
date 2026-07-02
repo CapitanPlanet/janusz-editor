@@ -3,6 +3,7 @@ import { ref, onMounted } from 'vue'
 import { useProjectStore } from './stores/projectStore'
 import LauncherView from './components/LauncherView.vue'
 import EditorView from './components/EditorView.vue'
+import TopBar from './components/TopBar.vue' // ← DODAJ
 
 const store = useProjectStore()
 const showLauncher = ref(true)
@@ -27,6 +28,10 @@ function handleProjectLoaded() {
   showLauncher.value = false
 }
 
+function goToMenu() {
+  showLauncher.value = true
+}
+
 onMounted(checkBackground)
 </script>
 
@@ -38,18 +43,21 @@ onMounted(checkBackground)
   ></div>
 
   <div class="app-container">
+    <!-- Launcher bez TopBara -->
     <LauncherView 
       v-if="showLauncher" 
       @project-loaded="handleProjectLoaded" 
     />
-    <EditorView 
-      v-else 
-      @go-to-menu="showLauncher = true" 
-    />
+    
+    <!-- Edytor Z TopBarem -->
+    <template v-else>
+      <TopBar @go-to-menu="goToMenu" /> <!-- ← TOPBAR TYLKO TUTAJ -->
+      <EditorView @go-to-menu="goToMenu" />
+    </template>
   </div>
 </template>
 
-<style scoped>
+<style>
 .bg-wrapper {
   position: fixed;
   inset: 0;
@@ -63,9 +71,18 @@ onMounted(checkBackground)
   inset: 0;
   background: rgba(10, 22, 40, 0.25);
 }
+
+/* ZMIANA: Grid 2-rzędowy gdy jest edytor */
 .app-container {
   position: relative;
   min-height: 100vh;
   z-index: 1;
+  display: grid;
+  grid-template-rows: auto 1fr; /* TopBar auto + Editor 1fr */
+}
+
+/* Jak jest Launcher, to grid 1-rzędowy */
+.app-container:has(.launcher) {
+  grid-template-rows: 1fr;
 }
 </style>

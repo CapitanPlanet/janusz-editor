@@ -2,6 +2,13 @@ import { defineStore } from 'pinia'
 import { invoke } from '@tauri-apps/api/core'
 import { writeTextFile, readDir } from '@tauri-apps/plugin-fs'
 
+interface Scene {
+  Id: string
+  Name?: string
+  Background?: string
+  [key: string]: any // na resztę pól Janusza
+}
+
 export const useProjectStore = defineStore('project', {
   state: () => ({
     currentProjectPath: null as string | null,
@@ -14,15 +21,21 @@ export const useProjectStore = defineStore('project', {
   getters: {
     currentScene: (state) => {
       if (!state.projectData) return null
-      return state.projectData.scenes.find(s => s.Id === state.currentSceneId)
+    return state.projectData?.scenes.find((s: Scene) => s.Id === state.currentSceneId)
     },
     sceneList: (state) => state.projectData?.scenes || []
   },
-  
+
  actions: {
+
+  newProject() { console.log('Nowy projekt') },
+  openProject() { console.log('Otwórz') },
+  saveAsProject() { console.log('Zapisz jako') },
+  buildGame() { console.log('Build') },
+
   async loadProject(path: string) {
     const json = await invoke('load_project', { path })
-    this.projectData = JSON.parse(json)
+    this.projectData = JSON.parse(json as string)
     this.currentProjectPath = path
     this.currentSceneId = this.projectData.scenes[0]?.Id || null
     await this.scanBackgrounds()
@@ -68,6 +81,7 @@ export const useProjectStore = defineStore('project', {
 
     this.currentSceneId = newScene.Id
   }
+  
 }
   
 })

@@ -15,7 +15,7 @@ export const useTabsStore = defineStore('tabs', () => {
   function closeFile(path: string) {
     openFiles.value = openFiles.value.filter(f => f !== path)
     if (activeFile.value === path) {
-      activeFile.value = openFiles.value.at(-1) ?? null
+    activeFile.value = openFiles.value[openFiles.value.length - 1] ?? null
     }
   }
 
